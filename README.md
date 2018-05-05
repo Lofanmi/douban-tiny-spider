@@ -40,3 +40,9 @@ php spider.php panyuzufang
 # http://hostname/group_name.html
 php spider.php group_name
 ```
+
+## 运行截图
+
+![](screenshots/爬取中.png)
+
+(更多效果图待完善)
