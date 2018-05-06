@@ -20,7 +20,7 @@ if (count($argv) !== 2) {
 
 try {
     $groupName = $argv[1];
-    $util      = 1000;
+    $util      = 2;
     $spider    = new Spider($groupName, $util);
     $spider->run();
 } catch (BlockException $e) {
@@ -73,6 +73,8 @@ class Spider
     protected $minute;
     protected $bid;
     protected $userAgent;
+
+    protected $sleep = 1;
 
     public function __construct($groupName, $util)
     {
@@ -180,42 +182,23 @@ class Spider
         file_put_contents("{$this->groupName}.html", str_init_html($topic));
     }
 
-    protected function appendHtml($d, $u)
+    protected function appendHtml($d)
     {
         if (!is_file($filename = "{$this->groupName}.html")) {
             return;
         }
-        $html = "<tr>\n";
-        // user time
-        $html .= "<td class='intro'>\n";
-        $html .= "<strong>计数: {$d['number']}</strong><br>\n";
-        $html .= "{$d['user']}<br>\n";
-        $html .= "<strong>发布时间: {$d['time']}</strong><br>\n";
-        $html .= "<a target='_blank' href='{$d['topic_url']}'>原文链接</a><br>\n";
-        $html .= "<br>";
-        $html .= "<strong>{$d['title']}</strong><br>\n";
-        $html .= "</td>\n";
-        // text
-        $html .= "<td class='text'>\n";
-        $html .= "{$d['text']}\n";
-        $html .= "</td>\n";
-        $html .= "</tr>\n";
-        // imgs
-        $html .= "<tr>\n";
-        $html .= "<td class='imgs' colspan='2'>\n";
+        $imgs = '';
         foreach ($d['imgs_save'] as $img) {
-            $html .= "<img class='lazy' data-original='{$img}'>\n";
+            $imgs .= "<img class='lazy' data-original='{$img}'>";
         }
-        $html .= "</td>\n";
-        $html .= "<tr><td class='empty' colspan='2'></td></tr>\n";
-        $html .= "</tr>\n\n";
+        $html = str_detail_html($d, $imgs);
         file_put_contents($filename, $html, FILE_APPEND);
     }
 
     protected function finishHtml()
     {
         if (is_file($filename = "{$this->groupName}.html")) {
-            file_put_contents($filename, '</body></html>', FILE_APPEND);
+            file_put_contents($filename, "\n</body>\n</html>", FILE_APPEND);
         }
     }
 
@@ -240,7 +223,7 @@ class Spider
 
         // 纯文本
         $text           = str_replace("\n", "<br>", strip_tags($result['text_raw']));
-        $text           = str_replace('<br><br>', '<br>', $text);
+        $text           = trim($text, '<br><br>');
         $result['text'] = str_clean($text);
         if (empty($result['text'])) {
             println('    -> 截取后话题内容为空');
@@ -361,7 +344,7 @@ class Spider
             return;
         }
 
-        sleep(1);
+        sleep($this->sleep);
 
         // 打印正在爬取的链接
         println("    >> {$u}");
@@ -533,16 +516,42 @@ function str_init_html($group)
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
-*{padding: 0;margin: 0; box-sizing: border-box; font-size: 14px; line-height: 24px; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;}
-body{background: #f1f1f4; width: 100%}
-nav{font-size: 18px; text-align: center;height: 50px; line-height: 50px; color: #fff; background: #1fc7b9}
-table{width: 90%; border-collapse: collapse; border: none; margin: 20px auto}
-td{padding: 10px; background: #fff; vertical-align: top}
-td.empty{background: #f1f1f4; padding: 20px}
-a{text-decoration: none; color: #0084ff}
-img{width: 100px}
-strong{font-weight: normal;color: #1fc7b9}
-.intro{width: 20%}
+* {
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+    font-size: 14px;
+    line-height: 24px;
+    font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
+}
+body {
+    background: #f1f1f4;
+    width: 100%;
+}
+a {
+    text-decoration: none;
+    color: #0084ff;
+}
+img {
+    width: 100px;
+}
+nav {
+    font-size: 16px;
+    text-align: center;
+    height: 50px;
+    line-height: 50px;
+    color: #fff;
+    background: #1fc7b9;
+}
+strong {
+    font-weight: normal;
+    color: #1fc7b9;
+}
+.item {
+    margin: 10px;
+    padding: 10px;
+    background: #fff;
+}
 </style>
 <script src="http://cdn.bootcss.com/jquery/2.2.4/jquery.js"></script>
 <script src="http://cdn.bootcss.com/jquery_lazyload/1.9.7/jquery.lazyload.js"></script>
@@ -555,7 +564,31 @@ $(function() {
 
 <nav>{$group}</nav>
 
-<table>
+HTML;
+}
+
+/**
+ * 详情 HTML.
+ *
+ * @param  string $d    详情
+ * @param  string $imgs img HTML
+ * @return string
+ */
+function str_detail_html($d, $imgs)
+{
+    return <<<HTML
+
+<section class="item">
+    <div class="content">
+        <strong>计数: {$d['number']}</strong><br>
+        {$d['user']}<br>
+        <strong>{$d['time']}</strong><br>
+        <a target="_blank" href="{$d['topic_url']}">豆瓣原文链接</a><br>
+        <br><strong>石牌桥~岗顶德欣小区挺好的二房</strong><br>
+        {$d['text']}
+        {$imgs}
+    </div>
+</section>
 
 HTML;
 }
