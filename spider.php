@@ -20,7 +20,7 @@ if (count($argv) !== 2) {
 
 try {
     $groupName = $argv[1];
-    $util      = 2;
+    $util      = 100;
     $spider    = new Spider($groupName, $util);
     $spider->run();
 } catch (BlockException $e) {
@@ -42,15 +42,46 @@ class BlockException extends Exception
  */
 class Spider
 {
+    /**
+     * 小组名(拼音; 如: yuexiuzufang).
+     *
+     * @var string
+     */
     protected $groupName;
+
+    /**
+     * 爬多少个之后就退出.
+     *
+     * @var integer
+     */
     protected $util;
 
+    /**
+     * 翻页每页记录数.
+     *
+     * @var integer
+     */
     protected $step = 25;
 
+    /**
+     * cURL handle.
+     *
+     * @var resource
+     */
     protected $ch;
 
+    /**
+     * 保存已经爬取的链接, 防止重复爬取.
+     *
+     * @var array
+     */
     protected $done = [];
 
+    /**
+     * 设置不感兴趣的关键词.
+     *
+     * @var array
+     */
     protected $skips = [
         '已出租', '已经租', '已租',
         // '找舍友', '招舍友', '求舍友',
@@ -59,6 +90,11 @@ class Spider
         // '求租',
     ];
 
+    /**
+     * 默认的 cURL 头部.
+     *
+     * @var array
+     */
     protected $defaultHeaders = [
         'Connection: keep-alive',
         'Cache-Control: max-age=0',
@@ -70,12 +106,40 @@ class Spider
         'Referer: https://www.douban.com/group/yuexiuzufang/discussion/',
     ];
 
+    /**
+     * 当前分钟数, 下一分钟将刷新 bid 和 userAgent.
+     *
+     * @var string
+     */
     protected $minute;
+
+    /**
+     * 当前的 bid.
+     *
+     * @var string
+     */
     protected $bid;
+
+    /**
+     * 当前的 User-Agent.
+     *
+     * @var string
+     */
     protected $userAgent;
 
+    /**
+     * 每次爬取后的睡眠时间.
+     *
+     * @var integer
+     */
     protected $sleep = 1;
 
+    /**
+     * 构造函数.
+     *
+     * @param string  $groupName 小组名(拼音)
+     * @param integer $util      爬多少个之后就退出
+     */
     public function __construct($groupName, $util)
     {
         date_default_timezone_set('PRC');
@@ -94,6 +158,9 @@ class Spider
         $this->userAgent = rand_user_agent();
     }
 
+    /**
+     * 用来测试爬虫是否被封禁.
+     */
     public static function testBlock()
     {
         try {
@@ -102,11 +169,22 @@ class Spider
             $spider    = new static($groupName, $util);
             $spider->run();
         } catch (BlockException $e) {
+            println('', false);
+            println('-------- curl_getinfo --------', false);
+            println(json_encode(
+                curl_getinfo($this->ch),
+                JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
+            ), false);
+            println('-------- curl_getinfo --------', false);
+            println('', false);
+            println('', false);
             println("!!!! " . $e->getMessage());
-            var_dump(curl_getinfo($this->ch));
         }
     }
 
+    /**
+     * 运行爬虫.
+     */
     public function run()
     {
         // 开始时间
@@ -176,25 +254,34 @@ class Spider
         println("抓取结束 用时 {$time} 秒");
     }
 
+    /**
+     * 初始化输出的 HTML 文件.
+     *
+     * @param  string $resp 响应, 用来截取小组名称作为页面标题
+     */
     protected function initHtml($resp)
     {
         $topic = trim(str_cut($resp, '<title>', '</title>'));
         file_put_contents("{$this->groupName}.html", str_init_html($topic));
     }
 
+    /**
+     * 追加抓取的内容到 HTML 文件中.
+     *
+     * @param  array $d 抓取的内容详情
+     */
     protected function appendHtml($d)
     {
         if (!is_file($filename = "{$this->groupName}.html")) {
             return;
         }
-        $imgs = '';
-        foreach ($d['imgs_save'] as $img) {
-            $imgs .= "<img class='lazy' data-original='{$img}'>";
-        }
-        $html = str_detail_html($d, $imgs);
+        $html = str_detail_html($d);
         file_put_contents($filename, $html, FILE_APPEND);
     }
 
+    /**
+     * 结束 HTML 输出.
+     */
     protected function finishHtml()
     {
         if (is_file($filename = "{$this->groupName}.html")) {
@@ -202,6 +289,14 @@ class Spider
         }
     }
 
+    /**
+     * 返回规范化的抓取结果.
+     *
+     * @param  string  $topicUrl 话题链接
+     * @param  string  $title    话题标题
+     * @param  integer $number   计数
+     * @return array             成功返回抓取结果
+     */
     protected function detail($topicUrl, $title, $number)
     {
         if ($this->skip($title)) {
@@ -220,19 +315,13 @@ class Spider
 
         // HTML
         $result['text_raw'] = str_cut($resp, '<div id="link-report" class="">', '<div id="link-report_group">');
-
-        // 纯文本
-        $text           = str_replace("\n", "<br>", strip_tags($result['text_raw']));
-        $text           = trim($text, '<br><br>');
-        $result['text'] = str_clean($text);
-        if (empty($result['text'])) {
-            println('    -> 截取后话题内容为空');
-            return;
-        }
-        if ($this->skip($result['text'])) {
+        if ($this->skip($result['text_raw'])) {
             println('    -> 跳过: 内容出现关键词');
             return;
         }
+
+        // 纯文本
+        $result['text'] = str_clean($result['text_raw']);
 
         // 原文链接
         $result['topic_url'] = $topicUrl;
@@ -253,15 +342,16 @@ class Spider
         // 图片原始链接列表
         $result['imgs_url'] = [];
 
-        // 本地图片列表
-        $result['imgs_save'] = [];
-
         // 查找图片并下载到本地
         if (preg_match_all('/img[^s]+src="(.+?)"/i', $result['text_raw'], $matches)) {
             $result['imgs_url'] = $matches[1];
-            foreach ($result['imgs_url'] as $imgUrl) {
+            foreach ($result['imgs_url'] as $i => $imgUrl) {
+                // 成功下载的图片, 把地址替换掉, 否则直接删除
                 if ($filename = $this->saveimg($imgUrl, topic_id($topicUrl))) {
-                    $result['imgs_save'][] = $filename;
+                    $img            = "img class='lazy' data-original='{$filename}'";
+                    $result['text'] = str_replace($matches[0][$i], $img, $result['text']);
+                } else {
+                    $result['text'] = str_replace($matches[0][$i], '', $result['text']);
                 }
             }
         }
@@ -270,6 +360,13 @@ class Spider
         return $result;
     }
 
+    /**
+     * 将图片保存到本地.
+     *
+     * @param  string $imgUrl  图片链接
+     * @param  string $topicId 话题ID
+     * @return string          保存成功返回本地的文件名
+     */
     protected function saveimg($imgUrl, $topicId)
     {
         // 获取文件名
@@ -315,6 +412,11 @@ class Spider
         }
     }
 
+    /**
+     * 获取模拟的 User-Agent.
+     *
+     * @return string
+     */
     protected function getUserAgent()
     {
         if (date('i') !== $this->minute) {
@@ -325,6 +427,11 @@ class Spider
         return "User-Agent: {$this->userAgent}";
     }
 
+    /**
+     * 获取模拟的 Cookie.
+     *
+     * @return string
+     */
     protected function getCookie()
     {
         if (date('i') !== $this->minute) {
@@ -336,6 +443,14 @@ class Spider
         return "Cookie: bid={$this->bid}";
     }
 
+    /**
+     * 发起 cURL 请求.
+     *
+     * @param  string $u      URL
+     * @return string         响应
+     *
+     * @throws BlockException 封禁异常
+     */
     protected function getUrl($u)
     {
         // 不重复爬取
@@ -370,6 +485,12 @@ class Spider
         return $data;
     }
 
+    /**
+     * 判断当前的内容是否感兴趣.
+     *
+     * @param  string $text 内容
+     * @return bool         true: 不感兴趣
+     */
     protected function skip($text)
     {
         foreach ($this->skips as $skip) {
@@ -380,6 +501,9 @@ class Spider
         return false;
     }
 
+    /**
+     * 析构函数.
+     */
     public function __destruct()
     {
         curl_close($this->ch);
@@ -425,7 +549,7 @@ function str_rand($len = 11)
  */
 function str_clean($text)
 {
-    $search = ['  ', '   ', "\r", "\n", "\t"];
+    $search = ['  ', '   ', "\r", "\t"];
     return trim(str_replace($search, '', $text));
 }
 
@@ -515,6 +639,7 @@ function str_init_html($group)
 <html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>{$group}</title>
 <style>
 * {
     padding: 0;
@@ -523,25 +648,34 @@ function str_init_html($group)
     font-size: 14px;
     line-height: 24px;
     font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
+    color: #333;
 }
 body {
     background: #f1f1f4;
     width: 100%;
+    padding-top: 50px;
 }
 a {
     text-decoration: none;
     color: #0084ff;
 }
 img {
-    width: 100px;
+    display: block;
+    max-width: 80%;
+    margin: 10px auto;
 }
 nav {
-    font-size: 16px;
-    text-align: center;
-    height: 50px;
-    line-height: 50px;
-    color: #fff;
+    position: fixed;
     background: #1fc7b9;
+    color: #fff;
+    font-size: 16px;
+    line-height: 50px;
+    text-align: center;
+    width: 100%;
+    height: 50px;
+    top: 0;
+    left: 0;
+    z-index: 100;
 }
 strong {
     font-weight: normal;
@@ -570,11 +704,10 @@ HTML;
 /**
  * 详情 HTML.
  *
- * @param  string $d    详情
- * @param  string $imgs img HTML
+ * @param  string $d 详情
  * @return string
  */
-function str_detail_html($d, $imgs)
+function str_detail_html($d)
 {
     return <<<HTML
 
@@ -585,8 +718,9 @@ function str_detail_html($d, $imgs)
         <strong>{$d['time']}</strong><br>
         <a target="_blank" href="{$d['topic_url']}">豆瓣原文链接</a><br>
         <br><strong>石牌桥~岗顶德欣小区挺好的二房</strong><br>
+        <!--text-->
         {$d['text']}
-        {$imgs}
+        <!--/text-->
     </div>
 </section>
 
